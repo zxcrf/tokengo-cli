@@ -2,6 +2,7 @@ export * as ConfigPaths from "./paths"
 
 import path from "path"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { Brand } from "@opencode-ai/core/brand"
 import { Global } from "@opencode-ai/core/global"
 import { unique } from "remeda"
 import * as Effect from "effect/Effect"
@@ -26,13 +27,13 @@ export const directories = Effect.fn("ConfigPaths.directories")(function* (direc
     Global.Path.config,
     ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG
       ? yield* afs.up({
-          targets: [".opencode"],
+          targets: [Brand.projectDir],
           start: directory,
           stop: worktree,
         })
       : []),
     ...(yield* afs.up({
-      targets: [".opencode"],
+      targets: [Brand.projectDir],
       start: Global.Path.home,
       stop: Global.Path.home,
     })),

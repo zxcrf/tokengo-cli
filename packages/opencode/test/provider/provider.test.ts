@@ -1977,7 +1977,7 @@ const provideMultiInstance = <A, E, R>(eff: Effect.Effect<A, E, R>) =>
 it.effect("plugin config providers persist after instance dispose", () =>
   Effect.gen(function* () {
     const dir = yield* tmpdirScoped()
-    const configDir = path.join(dir, ".opencode")
+    const configDir = path.join(dir, ".tokengo")
     const root = path.join(configDir, "plugin")
     yield* Effect.promise(() => mkdir(root, { recursive: true }))
     yield* Effect.promise(() => markPluginDependenciesReady(configDir))
@@ -2034,7 +2034,7 @@ it.instance(
   "plugin config enabled and disabled providers are honored",
   Effect.gen(function* () {
     const instance = yield* TestInstance
-    const configDir = path.join(instance.directory, ".opencode")
+    const configDir = path.join(instance.directory, ".tokengo")
     const root = path.join(configDir, "plugin")
     yield* Effect.promise(() => mkdir(root, { recursive: true }))
     yield* Effect.promise(() => markPluginDependenciesReady(configDir))
@@ -2115,4 +2115,76 @@ it.effect("opencode loader keeps paid models when auth exists", () =>
     expect(none).toBe(0)
     expect(keyedCount).toBeGreaterThan(0)
   }).pipe(provideMultiInstance),
+)
+
+const gateEnv = Effect.gen(function* () {
+  yield* setProcessEnv("OPENCODE_ALL_PROVIDERS", "0")
+  yield* setProcessEnv("ANTHROPIC_API_KEY", "test-api-key")
+  yield* setProcessEnv("OPENAI_API_KEY", "test-openai-key")
+})
+
+it.instance("gate: default list is token-go only, undeclared env providers stay absent", () =>
+  Effect.gen(function* () {
+    yield* gateEnv
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.anthropic]).toBeUndefined()
+    expect(providers[ProviderV2.ID.openai]).toBeUndefined()
+    expect(providers[ProviderV2.ID.opencode]).toBeUndefined()
+  }),
+)
+
+it.instance(
+  "gate: provider declared in config activates",
+  Effect.gen(function* () {
+    yield* gateEnv
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.anthropic]).toBeDefined()
+    expect(providers[ProviderV2.ID.anthropic].source).toBe("config")
+    expect(providers[ProviderV2.ID.openai]).toBeUndefined()
+    expect(providers[ProviderV2.ID.opencode]).toBeUndefined()
+  }),
+  { config: { provider: { anthropic: {} } } },
+)
+
+it.instance(
+  "gate: enabled_providers is exclusive",
+  Effect.gen(function* () {
+    yield* gateEnv
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.anthropic]).toBeDefined()
+    expect(providers[ProviderV2.ID.opencode]).toBeUndefined()
+  }),
+  { config: { enabled_providers: ["anthropic"] } },
+)
+
+it.instance(
+  "gate: disabled_providers removes a default",
+  Effect.gen(function* () {
+    yield* gateEnv
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.make("token-go")]).toBeUndefined()
+    expect(providers[ProviderV2.ID.opencode]).toBeUndefined()
+  }),
+  { config: { disabled_providers: ["token-go"] } },
+)
+
+it.instance(
+  "gate: models.dev tokengo id is never activated, even with the allow-all flag",
+  Effect.gen(function* () {
+    yield* setProcessEnv("OPENCODE_ALL_PROVIDERS", "1")
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.make("tokengo")]).toBeUndefined()
+  }),
+  {
+    config: {
+      provider: {
+        tokengo: {
+          name: "Other",
+          npm: "@ai-sdk/openai-compatible",
+          options: { apiKey: "k", baseURL: "https://example.invalid/v1" },
+          models: { m: { name: "m" } },
+        },
+      },
+    },
+  },
 )

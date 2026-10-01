@@ -98,6 +98,8 @@ export type AuthHook = {
               key: string
               message: string
               placeholder?: string
+              /** Mask the value while typing (secrets such as tokens). */
+              sensitive?: boolean
               validate?: (value: string) => string | undefined
               /** @deprecated Use `when` instead */
               condition?: (inputs: Record<string, string>) => boolean
@@ -128,6 +130,8 @@ export type AuthHook = {
               key: string
               message: string
               placeholder?: string
+              /** Mask the value while typing (secrets such as tokens). */
+              sensitive?: boolean
               validate?: (value: string) => string | undefined
               /** @deprecated Use `when` instead */
               condition?: (inputs: Record<string, string>) => boolean

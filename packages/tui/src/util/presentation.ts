@@ -1,6 +1,8 @@
+import { Brand } from "@opencode-ai/core/brand"
+
 const logo = {
-  left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
-  right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
+  left: [" ▄        ▄             ", "▀█▀▀ █▀▀█ █_▄▀ █▀▀█ █▀▀▄", "_█__ █__█ █▀▄_ █^^^ █__█", " ▀▀▀ ▀▀▀▀ ▀ ▀▀ ▀▀▀▀ ▀~~▀"],
+  right: ["         ", "█▀▀▀ █▀▀█", "█_^█ █__█", "▀▀▀▀ ▀▀▀▀"],
 }
 
 const reset = "\x1b[0m"
@@ -13,7 +15,7 @@ function wordmark(pad = "") {
       .map((char) => {
         if (char === "_") return `${bg} ${reset}`
         if (char === "^") return `${fg}${bg}▀${reset}`
-        if (char === "~") return `${shadow}▀${reset}`
+        if (char === "~" || char === ",") return " "
         if (char === " ") return " "
         return `${fg}${char}${reset}`
       })
@@ -32,7 +34,7 @@ export function sessionEpilogue(input: { title: string; sessionID?: string }) {
     ...wordmark("  "),
     "",
     `  ${weak("Session")}${bold}${input.title}${reset}`,
-    `  ${weak("Continue")}${bold}opencode -s ${input.sessionID}${reset}`,
+    `  ${weak("Continue")}${bold}${Brand.name} -s ${input.sessionID}${reset}`,
     "",
   ].join("\n")
 }

@@ -1,3 +1,4 @@
+import { Brand } from "@opencode-ai/core/brand"
 import { CliRenderEvents, SyntaxStyle, type TerminalColors } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import {
@@ -38,7 +39,7 @@ const themeSource: ThemeSource = {
   async discover() {
     const directories = [Global.Path.config]
     for (let current = process.cwd(); ; current = path.dirname(current)) {
-      directories.push(path.join(current, ".opencode"))
+      directories.push(path.join(current, Brand.projectDir))
       if (path.dirname(current) === current) break
     }
     return discoverThemes(directories)

@@ -2,9 +2,11 @@ import { ProviderAuth } from "@/provider/auth"
 import { Config } from "@/config/config"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { Provider } from "@/provider/provider"
+import { ProviderGate } from "@/provider/gate"
+import { Tokengo } from "@/provider/tokengo/models"
 import { Auth } from "@/auth"
 
-import { mapValues } from "remeda"
+import { mapValues, pickBy } from "remeda"
 import { Effect, Schema } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -22,7 +24,10 @@ function mapProviderAuthError<A, R>(self: Effect.Effect<A, ProviderAuth.Error, R
         return new ProviderAuthApiError({ name: error._tag, data: { providerID: error.providerID } })
       }
       if (error instanceof ProviderAuth.OauthCallbackFailed) {
-        return new ProviderAuthApiError({ name: error._tag, data: {} })
+        return new ProviderAuthApiError({
+          name: error._tag,
+          data: error.message ? { message: error.message } : {},
+        })
       }
       if (error instanceof ProviderAuth.ValidationFailed) {
         return new ProviderAuthApiError({ name: error._tag, data: { field: error.field, message: error.message } })
@@ -42,21 +47,23 @@ export const providerHandlers = HttpApiBuilder.group(InstanceHttpApi, "provider"
     const list = Effect.fn("ProviderHttpApi.list")(function* () {
       const config = yield* cfg.get()
       const all = yield* ModelsDev.Service.use((s) => s.get())
-      const disabled = new Set(config.disabled_providers ?? [])
-      const enabled = config.enabled_providers ? new Set(config.enabled_providers) : undefined
+      const allowed = ProviderGate.allowed(config)
       const filtered: Record<string, (typeof all)[string]> = {}
       for (const [key, value] of Object.entries(all)) {
-        if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) filtered[key] = value
+        if (allowed(key)) filtered[key] = value
       }
       const connected = yield* provider.list()
       const credentials = yield* authStore.all().pipe(Effect.orDie)
-      const providers = Object.assign(
-        mapValues(filtered, (item) => Provider.fromModelsDevProvider(item)),
-        connected,
+      const available: Record<string, Provider.Info> = mapValues(filtered, (item) =>
+        Provider.fromModelsDevProvider(item),
       )
+      // token-go is not in models.dev; list it so /connect can offer it before login.
+      if (allowed(Tokengo.ID)) available[Tokengo.ID] ??= Tokengo.info()
+      const providers = Object.assign(available, connected)
       return {
         all: Object.values(providers).map(Provider.toPublicInfo),
-        default: Provider.defaultModelIDs(providers),
+        // Providers listed before login (token-go) have no models yet.
+        default: Provider.defaultModelIDs(pickBy(providers, (item) => Object.keys(item.models).length > 0)),
         connected: Object.keys(providers).filter((id) => id in connected || credentials[id]),
       }
     })

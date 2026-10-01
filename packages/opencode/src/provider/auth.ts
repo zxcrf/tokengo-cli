@@ -19,6 +19,7 @@ const TextPrompt = Schema.Struct({
   key: Schema.String,
   message: Schema.String,
   placeholder: optional(Schema.String),
+  sensitive: optional(Schema.Boolean),
   when: optional(When),
 })
 
@@ -75,7 +76,9 @@ export class OauthCodeMissing extends Schema.TaggedErrorClass<OauthCodeMissing>(
 
 export class OauthCallbackFailed extends Schema.TaggedErrorClass<OauthCallbackFailed>()(
   "ProviderAuthOauthCallbackFailed",
-  {},
+  {
+    message: Schema.optional(Schema.String),
+  },
 ) {}
 
 export class ValidationFailed extends Schema.TaggedErrorClass<ValidationFailed>()("ProviderAuthValidationFailed", {
@@ -151,6 +154,7 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
                   key: prompt.key,
                   message: prompt.message,
                   ...(prompt.placeholder && { placeholder: prompt.placeholder }),
+                  ...(prompt.sensitive && { sensitive: true }),
                   ...(prompt.when && { when: prompt.when }),
                 }
               }),
@@ -195,9 +199,10 @@ const layer: Layer.Layer<Service, never, Auth.Service | Plugin.Service> = Layer.
         return yield* new OauthCodeMissing({ providerID: input.providerID })
       }
 
-      const result = yield* Effect.promise(() =>
-        match.method === "code" ? match.callback(input.code!) : match.callback(),
-      )
+      const result = yield* Effect.tryPromise({
+        try: () => (match.method === "code" ? match.callback(input.code!) : match.callback()),
+        catch: (err) => new OauthCallbackFailed({ message: err instanceof Error ? err.message : String(err) }),
+      })
       if (!result || result.type !== "success") return yield* new OauthCallbackFailed({})
 
       if ("key" in result) {

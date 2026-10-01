@@ -1,9 +1,11 @@
+import "./env-alias"
+import { Brand } from "@opencode-ai/core/brand"
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 import { RunCommand } from "./cli/cmd/run"
 import { GenerateCommand } from "./cli/cmd/generate"
-import { ConsoleCommand } from "./cli/cmd/account"
 import { ProvidersCommand } from "./cli/cmd/providers"
+import { LoginCommand, LogoutCommand, StatusCommand } from "./cli/cmd/tokengo"
 import { AgentCommand } from "./cli/cmd/agent"
 import { UpgradeCommand } from "./cli/cmd/upgrade"
 import { UninstallCommand } from "./cli/cmd/uninstall"
@@ -34,7 +36,7 @@ const args = hideBin(process.argv)
 
 function show(out: string) {
   const text = out.trimStart()
-  if (!text.startsWith("opencode ")) {
+  if (!text.startsWith(`${Brand.name} `)) {
     process.stderr.write(UI.logo() + EOL + EOL)
     process.stderr.write(text + EOL)
     return
@@ -44,7 +46,7 @@ function show(out: string) {
 
 const cli = yargs(args)
   .parserConfiguration({ "populate--": true })
-  .scriptName("opencode")
+  .scriptName(Brand.name)
   .wrap(100)
   .help("help", "show help")
   .alias("help", "h")
@@ -75,6 +77,8 @@ const cli = yargs(args)
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"
     process.env.OPENCODE_PID = String(process.pid)
+    process.env.TOKENGO = "1"
+    process.env.TOKENGO_PID = String(process.pid)
   })
   .usage("")
   .completion("completion", "generate shell completion script")
@@ -85,8 +89,10 @@ const cli = yargs(args)
   .command(RunCommand)
   .command(GenerateCommand)
   .command(DebugCommand)
-  .command(ConsoleCommand)
   .command(ProvidersCommand)
+  .command(LoginCommand)
+  .command(LogoutCommand)
+  .command(StatusCommand)
   .command(AgentCommand)
   .command(UpgradeCommand)
   .command(UninstallCommand)

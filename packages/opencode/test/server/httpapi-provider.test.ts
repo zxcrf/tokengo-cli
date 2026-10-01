@@ -106,10 +106,10 @@ function requestCallback(input: { providerID: string; method: number; headers: H
 function writeProviderAuthPlugin(dir: string) {
   return Effect.gen(function* () {
     const fs = yield* FSUtil.Service
-    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".opencode")))
+    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".tokengo")))
 
     yield* fs.writeWithDirs(
-      path.join(dir, ".opencode", "plugin", "provider-oauth-parity.ts"),
+      path.join(dir, ".tokengo", "plugin", "provider-oauth-parity.ts"),
       [
         "export default {",
         '  id: "test.provider-oauth-parity",',
@@ -141,10 +141,10 @@ function writeProviderAuthPlugin(dir: string) {
 function writeProviderAuthValidationPlugin(dir: string) {
   return Effect.gen(function* () {
     const fs = yield* FSUtil.Service
-    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".opencode")))
+    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".tokengo")))
 
     yield* fs.writeWithDirs(
-      path.join(dir, ".opencode", "plugin", "provider-oauth-validation.ts"),
+      path.join(dir, ".tokengo", "plugin", "provider-oauth-validation.ts"),
       [
         "export default {",
         '  id: "test.provider-oauth-validation",',
@@ -180,13 +180,47 @@ function writeProviderAuthValidationPlugin(dir: string) {
   })
 }
 
+function writeProviderAuthThrowingCallbackPlugin(dir: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FSUtil.Service
+    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".tokengo")))
+
+    yield* fs.writeWithDirs(
+      path.join(dir, ".tokengo", "plugin", "provider-oauth-throwing-callback.ts"),
+      [
+        "export default {",
+        '  id: "test.provider-oauth-throwing-callback",',
+        "  server: async () => ({",
+        "    auth: {",
+        '      provider: "test-oauth-throwing-callback",',
+        "      methods: [",
+        "        {",
+        '          type: "oauth",',
+        '          label: "OAuth",',
+        "          authorize: async () => ({",
+        `            url: "${oauthURL}",`,
+        '            method: "auto",',
+        `            instructions: "${oauthInstructions}",`,
+        "            callback: async () => { throw new Error('Subscribe first, then log in again') },",
+        "          }),",
+        "        },",
+        "      ],",
+        "    },",
+        "  }),",
+        "}",
+        "",
+      ].join("\n"),
+    )
+  })
+}
+
 function writeFunctionOptionsPlugin(dir: string) {
   return Effect.gen(function* () {
     const fs = yield* FSUtil.Service
-    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".opencode")))
+    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".tokengo")))
 
     yield* fs.writeWithDirs(
-      path.join(dir, ".opencode", "plugin", "provider-function-options.ts"),
+      path.join(dir, ".tokengo", "plugin", "provider-function-options.ts"),
       [
         "export default {",
         '  id: "test.provider-function-options",',
@@ -215,10 +249,10 @@ function writeFunctionOptionsPlugin(dir: string) {
 function writeProviderModelsMutationPlugin(dir: string) {
   return Effect.gen(function* () {
     const fs = yield* FSUtil.Service
-    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".opencode")))
+    yield* Effect.promise(() => markPluginDependenciesReady(path.join(dir, ".tokengo")))
 
     yield* fs.writeWithDirs(
-      path.join(dir, ".opencode", "plugin", "provider-models-mutation.ts"),
+      path.join(dir, ".tokengo", "plugin", "provider-models-mutation.ts"),
       [
         "export default {",
         '  id: "test.provider-models-mutation",',
@@ -348,6 +382,25 @@ describe("provider HttpApi", () => {
       })
     }),
     projectOptions,
+    30000,
+  )
+
+  it.instance(
+    "returns the plugin error message when an oauth callback throws",
+    Effect.gen(function* () {
+      const directory = (yield* TestInstance).directory
+      const headers = { "x-opencode-directory": directory, "content-type": "application/json" }
+      const authorize = yield* requestAuthorize({ providerID: "test-oauth-throwing-callback", method: 0, headers })
+      expect(authorize.status).toBe(200)
+
+      const response = yield* requestCallback({ providerID: "test-oauth-throwing-callback", method: 0, headers })
+      expect(response.status).toBe(400)
+      expect(JSON.parse(response.body)).toEqual({
+        name: "ProviderAuthOauthCallbackFailed",
+        data: { message: "Subscribe first, then log in again" },
+      })
+    }),
+    { ...projectOptions, init: writeProviderAuthThrowingCallbackPlugin },
     30000,
   )
 

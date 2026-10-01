@@ -66,10 +66,11 @@ export const Info = Schema.Struct({
       "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications",
   }),
   disabled_providers: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
-    description: "Disable providers that are loaded automatically",
+    description: "Disable providers that are loaded automatically. Always wins over defaults, provider.<id> and enabled_providers",
   }),
   enabled_providers: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
-    description: "When set, ONLY these providers will be enabled. All other providers will be ignored",
+    description:
+      "Only opencode and token-go are enabled by default; declaring provider.<id> enables that provider. When set, ONLY these providers are enabled and all others are ignored",
   }),
   model: Schema.optional(Schema.String).annotate({
     description: "Model to use in the format of provider/model, eg anthropic/claude-2",

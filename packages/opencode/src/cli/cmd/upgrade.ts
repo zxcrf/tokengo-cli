@@ -1,3 +1,4 @@
+import { Brand } from "@opencode-ai/core/brand"
 import type { Argv } from "yargs"
 import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
@@ -28,7 +29,7 @@ export const UpgradeCommand = {
     const detectedMethod = await Installation.method()
     const method = (args.method as Installation.Method) ?? detectedMethod
     if (method === "unknown") {
-      prompts.log.error(`opencode is installed to ${process.execPath} and may be managed by a package manager`)
+      prompts.log.error(`${Brand.name} is installed to ${process.execPath} and may be managed by a package manager`)
       const install = await prompts.select({
         message: "Install anyways?",
         options: [
@@ -43,10 +44,15 @@ export const UpgradeCommand = {
       }
     }
     prompts.log.info("Using method: " + method)
-    const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest()
+    const target = args.target ? args.target.replace(/^v/, "") : await Installation.latest().catch(() => undefined)
+    if (!target) {
+      prompts.log.error(`Could not determine the latest ${Brand.display} release. Check https://github.com/${Brand.repo}/releases`)
+      prompts.outro("Done")
+      return
+    }
 
     if (InstallationVersion === target) {
-      prompts.log.warn(`opencode upgrade skipped: ${target} is already installed`)
+      prompts.log.warn(`${Brand.name} upgrade skipped: ${target} is already installed`)
       prompts.outro("Done")
       return
     }

@@ -56,7 +56,7 @@ describe("HttpApi error middleware", () => {
   it.live("returns invalid config defects as structured client errors", () =>
     Effect.gen(function* () {
       const configError = new ConfigErrorV1.InvalidError({
-        path: "/tmp/opencode.json",
+        path: "/tmp/tokengo.json",
         issues: [{ message: "Expected object", path: ["provider", "anthropic", "options"] }],
       })
 
@@ -74,11 +74,11 @@ describe("HttpApi error middleware", () => {
       expect(body).toMatchObject({
         name: "ConfigInvalidError",
         data: {
-          path: "/tmp/opencode.json",
+          path: "/tmp/tokengo.json",
           issues: [{ message: "Expected object", path: ["provider", "anthropic", "options"] }],
         },
       })
-      expect(serialized).toContain("/tmp/opencode.json")
+      expect(serialized).toContain("/tmp/tokengo.json")
       expect(serialized).toContain("anthropic")
     }),
   )
@@ -87,7 +87,7 @@ describe("HttpApi error middleware", () => {
     Effect.gen(function* () {
       const configError = new ConfigErrorV1.RemoteAuthError({
         url: "https://example.com",
-        remote: "https://config.example.com/opencode.json",
+        remote: "https://config.example.com/tokengo.json",
       })
 
       yield* HttpRouter.add("GET", "/remote-auth-error", Effect.die(configError)).pipe(

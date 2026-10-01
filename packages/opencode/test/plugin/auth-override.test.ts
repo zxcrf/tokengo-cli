@@ -26,7 +26,7 @@ function providerAuthLayer(directory: string, plugins: string[]) {
             plugin: plugins,
             plugin_origins: plugins.map((plugin) => ({
               spec: plugin,
-              source: path.join(directory, "opencode.json"),
+              source: path.join(directory, "tokengo.json"),
               scope: "local" as const,
             })),
           }),
@@ -44,7 +44,7 @@ describe("plugin.auth-override", () => {
       Effect.gen(function* () {
         const tmp = yield* TestInstance
         const fs = yield* FSUtil.Service
-        const pluginDir = path.join(tmp.directory, ".opencode", "plugin")
+        const pluginDir = path.join(tmp.directory, ".tokengo", "plugin")
 
         yield* fs.writeWithDirs(
           path.join(pluginDir, "custom-copilot-auth.ts"),
@@ -79,6 +79,57 @@ describe("plugin.auth-override", () => {
         expect(copilot.length).toBe(1)
         expect(copilot[0].label).toBe("Test Override Auth")
         expect(plainMethods[ProviderV2.ID.make("github-copilot")][0].label).not.toBe("Test Override Auth")
+      }),
+    { git: true },
+    30000,
+  )
+})
+
+describe("plugin.auth-callback-error", () => {
+  it.instance(
+    "a throwing oauth callback fails with OauthCallbackFailed carrying the message",
+    () =>
+      Effect.gen(function* () {
+        const tmp = yield* TestInstance
+        const fs = yield* FSUtil.Service
+        const pluginDir = path.join(tmp.directory, ".tokengo", "plugin")
+        const providerID = ProviderV2.ID.make("test-throwing-callback")
+
+        yield* fs.writeWithDirs(
+          path.join(pluginDir, "throwing-callback-auth.ts"),
+          [
+            "export default {",
+            '  id: "demo.throwing-callback-auth",',
+            "  server: async () => ({",
+            "    auth: {",
+            '      provider: "test-throwing-callback",',
+            "      methods: [",
+            "        {",
+            '          type: "oauth",',
+            '          label: "OAuth",',
+            "          authorize: async () => ({",
+            '            url: "https://example.com/oauth",',
+            '            method: "auto",',
+            '            instructions: "Finish OAuth",',
+            "            callback: async () => { throw new Error('boom') },",
+            "          }),",
+            "        },",
+            "      ],",
+            "    },",
+            "  }),",
+            "}",
+            "",
+          ].join("\n"),
+        )
+
+        const plugin = pathToFileURL(path.join(pluginDir, "throwing-callback-auth.ts")).href
+        const error = yield* Effect.gen(function* () {
+          yield* ProviderAuth.use.authorize({ providerID, method: 0 })
+          return yield* ProviderAuth.use.callback({ providerID, method: 0 }).pipe(Effect.flip)
+        }).pipe(Effect.provide(providerAuthLayer(tmp.directory, [plugin])))
+
+        expect(error).toBeInstanceOf(ProviderAuth.OauthCallbackFailed)
+        expect((error as ProviderAuth.OauthCallbackFailed).message).toBe("boom")
       }),
     { git: true },
     30000,

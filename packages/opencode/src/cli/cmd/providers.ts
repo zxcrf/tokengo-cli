@@ -1,3 +1,4 @@
+import { Brand } from "@opencode-ai/core/brand"
 import type { Argv } from "yargs"
 import { Auth } from "../../auth"
 import { cmd } from "./cmd"
@@ -17,6 +18,8 @@ import { Process } from "@/util/process"
 import { errorMessage } from "@/util/error"
 import { text } from "node:stream/consumers"
 import { Effect, Option } from "effect"
+import { ProviderGate } from "@/provider/gate"
+import { Tokengo } from "@/provider/tokengo/models"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
 
@@ -83,11 +86,10 @@ const handlePluginAuth = Effect.fn("Cli.providers.pluginAuth")(function* (
         inputs[prompt.key] = yield* promptValue(value)
         continue
       }
-      const value = yield* Prompt.text({
-        message: prompt.message,
-        placeholder: prompt.placeholder,
-        validate: prompt.validate ? (v) => prompt.validate!(v ?? "") : undefined,
-      })
+      const validate = prompt.validate ? (v: string | undefined) => prompt.validate!(v ?? "") : undefined
+      const value = prompt.sensitive
+        ? yield* Prompt.password({ message: prompt.message, validate })
+        : yield* Prompt.text({ message: prompt.message, placeholder: prompt.placeholder, validate })
       inputs[prompt.key] = yield* promptValue(value)
     }
   }
@@ -359,12 +361,12 @@ export const ProvidersLoginCommand = effectCmd({
     const config = yield* cfgSvc.get()
 
     const disabled = new Set(config.disabled_providers ?? [])
-    const enabled = config.enabled_providers ? new Set(config.enabled_providers) : undefined
+    const allowed = ProviderGate.allowed(config)
 
     const allProviders = yield* modelsDev.get()
     const providers: Record<string, (typeof allProviders)[string]> = {}
     for (const [key, value] of Object.entries(allProviders)) {
-      if ((enabled ? enabled.has(key) : true) && !disabled.has(key)) providers[key] = value
+      if (allowed(key)) providers[key] = value
     }
     const hooks = yield* pluginSvc.list()
 
@@ -381,8 +383,11 @@ export const ProvidersLoginCommand = effectCmd({
       hooks,
       existingProviders: providers,
       disabled,
-      enabled,
-      providerNames: Object.fromEntries(Object.entries(config.provider ?? {}).map(([id, p]) => [id, p.name])),
+      enabled: new Set(hooks.flatMap((h) => (h.auth ? [h.auth.provider] : [])).filter(allowed)),
+      providerNames: {
+        [Tokengo.ID]: Tokengo.NAME,
+        ...Object.fromEntries(Object.entries(config.provider ?? {}).map(([id, p]) => [id, p.name])),
+      },
     })
     const options = [
       ...pipe(
@@ -449,7 +454,7 @@ export const ProvidersLoginCommand = effectCmd({
       }
 
       yield* Prompt.log.warn(
-        `This only stores a credential for ${provider} - you will need configure it in opencode.json, check the docs for examples.`,
+        `This only stores a credential for ${provider} - you will need configure it in ${Brand.configFile}.json, check the docs for examples.`,
       )
     }
 
@@ -458,7 +463,7 @@ export const ProvidersLoginCommand = effectCmd({
         "Amazon Bedrock authentication priority:\n" +
           "  1. Bearer token (AWS_BEARER_TOKEN_BEDROCK or /connect)\n" +
           "  2. AWS credential chain (profile, access keys, IAM roles, EKS IRSA)\n\n" +
-          "Configure via opencode.json options (profile, region, endpoint) or\n" +
+          `Configure via ${Brand.configFile}.json options (profile, region, endpoint) or\n` +
           "AWS environment variables (AWS_PROFILE, AWS_REGION, AWS_ACCESS_KEY_ID, AWS_WEB_IDENTITY_TOKEN_FILE).",
       )
     }

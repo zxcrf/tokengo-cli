@@ -5,9 +5,10 @@ import os from "os"
 import { Context, Effect, Layer } from "effect"
 import { Flock } from "./util/flock"
 import { Flag } from "./flag/flag"
+import { Brand } from "./brand"
 import { makeGlobalNode } from "./effect/app-node"
 
-const app = "opencode"
+const app = Brand.name
 const data = path.join(xdgData!, app)
 const cache = path.join(xdgCache!, app)
 const config = path.join(xdgConfig!, app)

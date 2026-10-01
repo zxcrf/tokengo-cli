@@ -31,6 +31,9 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { ProviderGate } from "./gate"
+import { Tokengo } from "./tokengo/models"
+import { TOKENGO_BASE_URL } from "./tokengo/client"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
 
@@ -190,6 +193,7 @@ type CustomDep = {
   config: () => Effect.Effect<ConfigV1.Info>
   env: () => Effect.Effect<Record<string, string | undefined>>
   get: (key: string) => Effect.Effect<string | undefined>
+  catalog: () => Record<string, Info>
 }
 
 function selectAzureLanguageModel(sdk: any, modelID: string, useChat: boolean) {
@@ -208,6 +212,26 @@ function selectBedrockMantleLanguageModel(sdk: BundledSDK, modelID: string) {
 
 function custom(dep: CustomDep): Record<string, CustomLoader> {
   return {
+    [Tokengo.ID]: Effect.fnUntraced(function* (provider: Info) {
+      const auth = yield* dep.auth(provider.id)
+      const meta = auth?.type === "api" ? auth.metadata : undefined
+      const pat = meta?.pat
+      const group = meta?.group
+      if (!pat || !group) return { autoload: false }
+      const baseURL = meta.baseURL || TOKENGO_BASE_URL
+      return {
+        autoload: true,
+        // apiKey comes from provider.key (the stored credential) in resolveSDK.
+        options: {},
+        // One provider, three SDKs: model.api.npm is chosen per endpoint type at discovery time.
+        async getModel(sdk: any, modelID: string, _options?: Record<string, any>, model?: Model) {
+          if (model?.api.npm === "@ai-sdk/openai") return sdk.responses?.(modelID) ?? sdk.languageModel(modelID)
+          if (model?.api.npm === "@ai-sdk/openai-compatible") return sdk.chat?.(modelID) ?? sdk.languageModel(modelID)
+          return sdk.languageModel(modelID)
+        },
+        discoverModels: () => Tokengo.discover({ baseURL, pat, group, userId: meta.userId, catalog: dep.catalog() }),
+      }
+    }),
     anthropic: () =>
       Effect.succeed({
         autoload: false,
@@ -1455,6 +1479,8 @@ const layer = Layer.effect(
         const modelsDev = yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
         const database = mapValues(catalog, toPublicInfo)
+        // token-go is not in models.dev; its models are discovered from the account at load time.
+        database[ProviderV2.ID.make(Tokengo.ID)] ??= Tokengo.info()
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
         const languages = new Map<string, LanguageModelV3>()
@@ -1473,6 +1499,7 @@ const layer = Layer.effect(
           config: () => config.get(),
           env: () => env.all(),
           get: (key: string) => env.get(key),
+          catalog: () => catalog,
         }
 
         function mergeProvider(providerID: ProviderV2.ID, provider: Partial<Info>) {
@@ -1493,14 +1520,7 @@ const layer = Layer.effect(
 
         // now read config providers - includes any modifications from plugin config() hook
         const configProviders = Object.entries(cfg.provider ?? {})
-        const disabled = new Set(cfg.disabled_providers ?? [])
-        const enabled = cfg.enabled_providers ? new Set(cfg.enabled_providers) : null
-
-        function isProviderAllowed(providerID: ProviderV2.ID): boolean {
-          if (enabled && !enabled.has(providerID)) return false
-          if (disabled.has(providerID)) return false
-          return true
-        }
+        const isProviderAllowed = ProviderGate.allowed(cfg)
 
         for (const hook of plugins) {
           const p = hook.provider
@@ -1508,7 +1528,7 @@ const layer = Layer.effect(
           if (!p || !models) continue
 
           const providerID = ProviderV2.ID.make(p.id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
 
           const provider = database[providerID]
           if (!provider) continue
@@ -1634,7 +1654,7 @@ const layer = Layer.effect(
         const envs = yield* env.all()
         for (const [id, provider] of Object.entries(database)) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           const apiKey = provider.env.map((item) => envs[item]).find(Boolean)
           if (!apiKey) continue
           mergeProvider(providerID, {
@@ -1647,7 +1667,7 @@ const layer = Layer.effect(
         const auths = yield* auth.all().pipe(Effect.orDie)
         for (const [id, provider] of Object.entries(auths)) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           if (provider.type === "api") {
             mergeProvider(providerID, {
               source: "api",
@@ -1660,7 +1680,7 @@ const layer = Layer.effect(
         for (const plugin of plugins) {
           if (!plugin.auth) continue
           const providerID = ProviderV2.ID.make(plugin.auth.provider)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
 
           const stored = yield* auth.get(providerID).pipe(Effect.orDie)
           if (!stored) continue
@@ -1679,7 +1699,7 @@ const layer = Layer.effect(
 
         for (const [id, fn] of Object.entries(custom(dep))) {
           const providerID = ProviderV2.ID.make(id)
-          if (disabled.has(providerID)) continue
+          if (!isProviderAllowed(providerID)) continue
           const data = database[providerID]
           if (!data) {
             continue
@@ -1705,15 +1725,35 @@ const layer = Layer.effect(
           mergeProvider(providerID, partial)
         }
 
-        const gitlab = ProviderV2.ID.make("gitlab")
-        if (discoveryLoaders[gitlab] && providers[gitlab] && isProviderAllowed(gitlab)) {
+        for (const [id, discover] of Object.entries(discoveryLoaders)) {
+          const providerID = ProviderV2.ID.make(id)
+          if (!providers[providerID] || !isProviderAllowed(providerID)) continue
           yield* Effect.promise(async () => {
             try {
-              const discovered = await discoveryLoaders[gitlab]()
+              const discovered = await discover()
               for (const [modelID, model] of Object.entries(discovered)) {
-                if (!providers[gitlab].models[modelID]) {
-                  providers[gitlab].models[modelID] = model
+                const existing = providers[providerID].models[modelID]
+                if (!existing) {
+                  providers[providerID].models[modelID] = model
+                  continue
                 }
+                // The config loop flattened a declared token-go model with defaults (no capabilities,
+                // zero cost/limit). Rebuild it from the discovered model plus only the fields the user
+                // actually wrote; keep an explicit endpoint/npm. Config variant overrides are merged below.
+                const providerConfig = cfg.provider?.[providerID]
+                const raw = providerConfig?.models?.[modelID]
+                if (providerID !== Tokengo.ID || !raw) continue
+                const merged = mergeDeep(model, configModelOverrides(raw)) as Model
+                merged.api = existing.api.url
+                  ? existing.api
+                  : {
+                      id: existing.api.id,
+                      url: model.api.url,
+                      npm: raw.provider?.npm ?? providerConfig?.npm ?? model.api.npm,
+                    }
+                // Keep the discovered per-family variants; config variant overrides are merged below.
+                merged.variants = model.variants
+                providers[providerID].models[modelID] = merged
               }
             } catch (e) {}
           })
@@ -1992,9 +2032,11 @@ const layer = Layer.effect(
 
       const priority = providerID.startsWith("opencode")
         ? ["gpt-nano"]
-        : providerID.startsWith("github-copilot")
-          ? ["gpt-mini", ...smallModelFamilyPriority]
-          : smallModelFamilyPriority
+        : providerID === Tokengo.ID
+          ? ["claude-haiku", "gpt-nano", "gemini-flash"]
+          : providerID.startsWith("github-copilot")
+            ? ["gpt-mini", ...smallModelFamilyPriority]
+            : smallModelFamilyPriority
       const models = sortBy(
         Object.values(provider.models),
         [(model) => model.release_date, "desc"],
@@ -2052,6 +2094,11 @@ const layer = Layer.effect(
       }
 
       const configured = Object.keys(cfg.provider ?? {})
+      const tokengo = s.providers[ProviderV2.ID.make(Tokengo.ID)]
+      if (tokengo && (configured.length === 0 || configured.includes(Tokengo.ID))) {
+        const modelID = Tokengo.defaultModelID(tokengo.models)
+        if (modelID) return { providerID: tokengo.id, modelID: ModelV2.ID.make(modelID) }
+      }
       const provider = Object.values(s.providers).find((p) => configured.length === 0 || configured.includes(p.id))
       if (!provider) return yield* new NoProvidersError()
       const [model] = sort(Object.values(provider.models))
@@ -2075,6 +2122,43 @@ export function sort<T extends { id: string }>(models: T[]) {
     [(model) => (model.id.includes("latest") ? 0 : 1), "asc"],
     [(model) => model.id, "desc"],
   )
+}
+
+type ConfigModel = NonNullable<NonNullable<ConfigV1.Info["provider"]>[string]["models"]>[string]
+
+// Maps the fields a user wrote for a model in config onto Provider.Model shape, omitting unset ones.
+function configModelOverrides(raw: ConfigModel) {
+  const modalities = (list: readonly string[] | undefined) =>
+    list && Object.fromEntries(["text", "audio", "image", "video", "pdf"].map((kind) => [kind, list.includes(kind)]))
+  return defined({
+    name: raw.name,
+    family: raw.family,
+    release_date: raw.release_date,
+    status: raw.status,
+    options: raw.options,
+    headers: raw.headers,
+    limit: raw.limit,
+    cost:
+      raw.cost &&
+      defined({
+        input: raw.cost.input,
+        output: raw.cost.output,
+        cache: defined({ read: raw.cost.cache_read, write: raw.cost.cache_write }),
+      }),
+    capabilities: defined({
+      temperature: raw.temperature,
+      reasoning: raw.reasoning,
+      attachment: raw.attachment,
+      toolcall: raw.tool_call,
+      interleaved: typeof raw.interleaved === "string" ? { field: raw.interleaved } : raw.interleaved,
+      input: modalities(raw.modalities?.input),
+      output: modalities(raw.modalities?.output),
+    }),
+  })
+}
+
+function defined<T extends Record<string, unknown>>(input: T) {
+  return pickBy(input, (value) => value !== undefined) as Partial<T>
 }
 
 export function parseModel(model: string) {

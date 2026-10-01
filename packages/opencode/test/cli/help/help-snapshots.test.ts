@@ -49,6 +49,9 @@ const TOP_LEVEL = [
   "run",
   "debug",
   "providers", // aliased to `auth`
+  "login",
+  "logout",
+  "status",
   "agent",
   "upgrade",
   "uninstall",

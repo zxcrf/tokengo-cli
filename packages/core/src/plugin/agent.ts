@@ -1,5 +1,6 @@
 export * as AgentPlugin from "./agent"
 
+import { Brand } from "../brand"
 import path from "path"
 import { define } from "./internal"
 import { Effect } from "effect"
@@ -139,7 +140,7 @@ export const Plugin = define({
             { action: "plan_exit", resource: "*", effect: "allow" },
             { action: "external_directory", resource: path.join(Global.Path.data, "plans", "*"), effect: "allow" },
             { action: "edit", resource: "*", effect: "deny" },
-            { action: "edit", resource: path.join(".opencode", "plans", "*.md"), effect: "allow" },
+            { action: "edit", resource: path.join(Brand.projectDir, "plans", "*.md"), effect: "allow" },
             {
               action: "edit",
               resource: path.relative(worktree, path.join(Global.Path.data, "plans", "*.md")),
