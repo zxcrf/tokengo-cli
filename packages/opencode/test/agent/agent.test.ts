@@ -58,6 +58,20 @@ it.instance("returns default native agents when no config", () =>
   }),
 )
 
+// TokenGo: /review runs on a stable model and must never be able to edit what it reviews.
+it.instance("reviewer agent is read-only and pinned to gpt-6-astra", () =>
+  Effect.gen(function* () {
+    const reviewer = yield* load((svc) => svc.get("reviewer"))
+    expect(reviewer?.mode).toBe("subagent")
+    expect(reviewer?.native).toBe(true)
+    expect(reviewer?.model).toEqual(Provider.parseModel("token-go/gpt-6-astra"))
+    expect(evalPerm(reviewer, "edit")).toBe("deny")
+    expect(evalPerm(reviewer, "write")).toBe("deny")
+    expect(evalPerm(reviewer, "read")).toBe("allow")
+    expect(evalPerm(reviewer, "bash")).toBe("allow")
+  }),
+)
+
 it.instance("build agent has correct default properties", () =>
   Effect.gen(function* () {
     const build = yield* load((svc) => svc.get("build"))

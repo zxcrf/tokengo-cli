@@ -217,6 +217,31 @@ const layer = Layer.effect(
             mode: "subagent",
             native: true,
           },
+          // TokenGo: read-only reviewer pinned to GPT-6 Astra; override with agent.reviewer.model.
+          reviewer: {
+            name: "reviewer",
+            permission: Permission.merge(
+              defaults,
+              Permission.fromConfig({
+                "*": "deny",
+                grep: "allow",
+                glob: "allow",
+                list: "allow",
+                bash: "allow",
+                read: "allow",
+                task: "allow",
+                webfetch: "allow",
+                websearch: "allow",
+                external_directory: readonlyExternalDirectory,
+              }),
+              user,
+            ),
+            description: `Read-only code reviewer. Use it to review a diff, commit, branch, or PR for bugs and report findings with file:line evidence. It never edits files.`,
+            model: Provider.parseModel("token-go/gpt-6-astra"),
+            options: {},
+            mode: "subagent",
+            native: true,
+          },
           compaction: {
             name: "compaction",
             mode: "primary",
