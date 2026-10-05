@@ -24,6 +24,7 @@ export class Service extends ConfigService.Service<Service>()("@opencode/Runtime
     broad: bool("OPENCODE_DISABLE_CLAUDE_CODE"),
     direct: bool("OPENCODE_DISABLE_CLAUDE_CODE_PROMPT"),
   }).pipe(Config.map((flags) => flags.broad || flags.direct)),
+  enableClaudeCodeGlobalPrompt: bool("OPENCODE_ENABLE_CLAUDE_CODE_GLOBAL_PROMPT"),
   disableClaudeCodeSkills: Config.all({
     broad: bool("OPENCODE_DISABLE_CLAUDE_CODE"),
     direct: bool("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"),

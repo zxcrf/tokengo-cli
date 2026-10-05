@@ -248,6 +248,45 @@ describe("Instruction.system", () => {
   )
 })
 
+describe("Instruction.system TokenGo globals", () => {
+  // ~/.agents/AGENTS.md is the cross-tool rules layer; it must not be shadowed by the tool-specific global file.
+  it.live("stacks ~/.agents/AGENTS.md, global config AGENTS.md, then project AGENTS.md", () =>
+    Effect.gen(function* () {
+      const homeTmp = yield* tmpWithFiles({ ".agents/AGENTS.md": "# Shared" })
+      const configTmp = yield* tmpWithFiles({ "AGENTS.md": "# Tool" })
+      const projectTmp = yield* tmpWithFiles({ "AGENTS.md": "# Project" })
+
+      yield* Effect.gen(function* () {
+        const svc = yield* Instruction.Service
+        expect(yield* svc.system()).toEqual([
+          `Instructions from: ${path.join(homeTmp, ".agents", "AGENTS.md")}\n# Shared`,
+          `Instructions from: ${path.join(configTmp, "AGENTS.md")}\n# Tool`,
+          `Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project`,
+        ])
+      }).pipe(provideInstance(projectTmp), provideInstruction({ home: homeTmp, config: configTmp }))
+    }),
+  )
+
+  // Claude Code's personal global rules must not leak into TokenGo sessions unless the user opts in.
+  it.live("skips ~/.claude/CLAUDE.md by default and loads it when opted in", () =>
+    Effect.gen(function* () {
+      const homeTmp = yield* tmpWithFiles({ ".claude/CLAUDE.md": "# Claude" })
+      const configTmp = yield* tmpdirScoped()
+      const projectTmp = yield* tmpdirScoped()
+      const claude = path.join(homeTmp, ".claude", "CLAUDE.md")
+
+      const loaded = (flags?: Partial<RuntimeFlags.Info>) =>
+        Effect.gen(function* () {
+          const svc = yield* Instruction.Service
+          return (yield* svc.systemPaths()).has(claude)
+        }).pipe(provideInstance(projectTmp), provideInstruction({ home: homeTmp, config: configTmp }, flags))
+
+      expect(yield* loaded()).toBe(false)
+      expect(yield* loaded({ enableClaudeCodeGlobalPrompt: true })).toBe(true)
+    }),
+  )
+})
+
 describe("Instruction.systemPaths global config", () => {
   it.live("uses Global.Service config AGENTS.md", () =>
     Effect.gen(function* () {

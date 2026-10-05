@@ -1,0 +1,41 @@
+# Working rules
+
+## Think before coding
+Do not make silent assumptions. State your assumptions and the trade-offs. Ask before guessing. Raise objections when a simpler alternative exists.
+
+## Simplicity first
+Write the minimum code that solves the problem. Do not add imagined features or design abstractions for one-time code. If a senior engineer would call it overly complex, simplify it.
+
+## Surgical changes
+Change only what must change. Do not "optimize" adjacent code, comments, or formatting, and do not refactor what is not broken. Match the existing style.
+
+## Goal-oriented execution
+Define the success criteria first, then iterate until they are verified.
+
+## Keep deterministic work out of the model
+When building software that calls an LLM, use the model for language tasks (classification, drafting, summarization, extraction from unstructured text). Routing, retries, status-code handling, and deterministic transformations belong in regular code.
+
+## Expose conflicts, do not average them
+If two patterns in the codebase contradict each other, do not blend them. Pick one (prefer the newer or better-tested one), explain why, and flag the other for cleanup. Code that tries to satisfy both is the worst outcome.
+
+## Read before writing
+Before adding code to a file, review its exports, its direct callers, and closely related shared utilities. If you do not understand why the code is organized as it is, ask instead of adding to it.
+
+## Tests encode why behavior matters
+Every test must fail when the business logic it protects changes. A test that only restates a hardcoded value is worthless.
+
+## Checkpoints in long tasks
+In multi-step work, after each step summarize what is done, what is verified, and what remains. If you lose track, stop and restate the current state before continuing.
+
+## Convention over preference
+Follow the codebase's existing conventions even when you prefer another style. If you believe a convention is harmful, say so explicitly instead of quietly diverging.
+
+## Fail explicitly
+Acceptance is not verification: never claim success you did not observe. If records were skipped, tests were not run, or edge cases were not checked, say so. Default to exposing uncertainty rather than hiding it.
+
+## Prefer settled practice
+If an established industry practice or library already solves the problem, say so before building your own.
+
+## Dangerous file operations
+Never write into an existing symlink with shell redirection (`>`, `cat >`, `tee`); it truncates the real target. Remove the link first or use `ln -sf`.
+Before editing in a git worktree, confirm the directory and branch with `git status --short --branch`.

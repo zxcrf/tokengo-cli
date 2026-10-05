@@ -102,6 +102,14 @@ describe("session.system", () => {
     }
   })
 
+  test("appends the TokenGo working rules after every model-family prompt", () => {
+    for (const id of ["claude-sonnet-5", "gpt-6-astra", "gemini-3-pro", "deepseek-flash"]) {
+      const prompts = SystemPrompt.provider({ api: { id } } as Provider.Model)
+      expect(prompts).toHaveLength(2)
+      expect(prompts[1]).toContain("# Working rules")
+    }
+  })
+
   test("selects the Kimi prompt for official provider model IDs", () => {
     for (const providerID of ["kimi-for-coding", "moonshotai", "moonshotai-cn"]) {
       const prompt = SystemPrompt.provider({ providerID, api: { id: "k3" } } as Provider.Model)[0]

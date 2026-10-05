@@ -57,9 +57,14 @@ const layer: Layer.Layer<
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
     const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
+    // TokenGo: the cross-tool ~/.agents/AGENTS.md always stacks before the tool-specific global file.
+    // ~/.claude/CLAUDE.md holds Claude Code's personal rules, so it is opt-in.
+    const sharedGlobalFile = path.join(global.home, ".agents", "AGENTS.md")
     const globalFiles = [
       path.join(global.config, "AGENTS.md"),
-      ...(!flags.disableClaudeCodePrompt ? [path.join(global.home, ".claude", "CLAUDE.md")] : []),
+      ...(flags.enableClaudeCodeGlobalPrompt && !flags.disableClaudeCodePrompt
+        ? [path.join(global.home, ".claude", "CLAUDE.md")]
+        : []),
     ]
     const instructionFiles = [
       "AGENTS.md",
@@ -112,6 +117,7 @@ const layer: Layer.Layer<
       const ctx = yield* InstanceState.context
       const paths = new Set<string>()
 
+      if (yield* fs.existsSafe(sharedGlobalFile)) paths.add(path.resolve(sharedGlobalFile))
       for (const file of globalFiles) {
         if (yield* fs.existsSafe(file)) {
           paths.add(path.resolve(file))
