@@ -18,9 +18,12 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Types } from "effect"
+import { Effect, Layer, Context, Schedule, Schema, Scope, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
+import { InstanceRef } from "@/effect/instance-ref"
+import type { InstanceContext } from "@/project/instance-context"
+import { GlobalBus } from "@/bus/global"
 import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { isRecord } from "@/util/record"
@@ -180,12 +183,15 @@ const BUNDLED_PROVIDERS: Record<string, () => Promise<(opts: any) => BundledSDK>
 type CustomModelLoader = (sdk: any, modelID: string, options?: Record<string, any>, model?: Model) => Promise<any>
 type CustomVarsLoader = (options: Record<string, any>) => Record<string, string>
 type CustomDiscoverModels = () => Promise<Record<string, Model>>
+// Resolves to the fresh model list, or undefined when the cached list is still current.
+type CustomRefreshModels = () => Promise<Record<string, Model> | undefined>
 type CustomLoader = (provider: Info) => Effect.Effect<{
   autoload: boolean
   getModel?: CustomModelLoader
   vars?: CustomVarsLoader
   options?: Record<string, any>
   discoverModels?: CustomDiscoverModels
+  refreshModels?: CustomRefreshModels
 }>
 
 type CustomDep = {
@@ -230,6 +236,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           return sdk.languageModel(modelID)
         },
         discoverModels: () => Tokengo.discover({ baseURL, pat, group, userId: meta.userId, catalog: dep.catalog() }),
+        refreshModels: () => Tokengo.refresh({ baseURL, pat, group, userId: meta.userId, catalog: dep.catalog() }),
       }
     }),
     anthropic: () =>
@@ -1471,8 +1478,21 @@ const layer = Layer.effect(
     const plugin = yield* Plugin.Service
     const modelsDevSvc = yield* ModelsDev.Service
     const runtimeFlags = yield* RuntimeFlags.Service
+    const layerScope = yield* Scope.Scope
 
-    const state = yield* InstanceState.make<State>(() =>
+    // Rebuild this instance's provider state and tell clients to re-fetch providers. Runs in the
+    // layer scope because the refresh loop that triggers it lives in the state being replaced.
+    const reload = (ctx: InstanceContext): Effect.Effect<void> =>
+      InstanceState.invalidate(state).pipe(
+        Effect.andThen(
+          Effect.sync(() =>
+            GlobalBus.emit("event", { directory: ctx.directory, payload: { type: "catalog.updated", properties: {} } }),
+          ),
+        ),
+        Effect.provideService(InstanceRef, ctx),
+      )
+
+    const state = yield* InstanceState.make<State>((ctx) =>
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
@@ -1494,6 +1514,9 @@ const layer = Layer.effect(
         const discoveryLoaders: {
           [providerID: string]: CustomDiscoverModels
         } = {}
+        const refreshLoaders: Record<string, CustomRefreshModels> = {}
+        // JSON of each discovered list, taken before the normalisation below mutates the models.
+        const discoveredSnapshot: Record<string, string> = {}
         const dep = {
           auth: (id: string) => auth.get(id).pipe(Effect.orDie),
           config: () => config.get(),
@@ -1709,6 +1732,7 @@ const layer = Layer.effect(
             if (result.getModel) modelLoaders[providerID] = result.getModel
             if (result.vars) varsLoaders[providerID] = result.vars
             if (result.discoverModels) discoveryLoaders[providerID] = result.discoverModels
+            if (result.refreshModels) refreshLoaders[providerID] = result.refreshModels
             const opts = result.options ?? {}
             const patch: Partial<Info> = providers[providerID] ? { options: opts } : { source: "custom", options: opts }
             mergeProvider(providerID, patch)
@@ -1731,6 +1755,7 @@ const layer = Layer.effect(
           yield* Effect.promise(async () => {
             try {
               const discovered = await discover()
+              discoveredSnapshot[providerID] = JSON.stringify(discovered)
               for (const [modelID, model] of Object.entries(discovered)) {
                 const existing = providers[providerID].models[modelID]
                 if (!existing) {
@@ -1807,6 +1832,21 @@ const layer = Layer.effect(
             delete providers[providerID]
             continue
           }
+        }
+
+        // Like upstream models.dev: refresh once now (if stale) and every 60 minutes while running.
+        // A changed list rebuilds the state so /models shows it without a restart.
+        for (const [id, refresh] of Object.entries(refreshLoaders)) {
+          if (!providers[ProviderV2.ID.make(id)]) continue
+          yield* Effect.promise(() => refresh().catch(() => undefined)).pipe(
+            Effect.flatMap((models) =>
+              models && JSON.stringify(models) !== discoveredSnapshot[id]
+                ? Effect.asVoid(Effect.forkIn(reload(ctx), layerScope))
+                : Effect.void,
+            ),
+            Effect.repeat(Schedule.spaced("60 minutes")),
+            Effect.forkScoped,
+          )
         }
 
         return {

@@ -4,6 +4,7 @@ import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { effectCmd, fail } from "../effect-cmd"
 import { UI } from "../ui"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Tokengo } from "@/provider/tokengo/models"
 
 export const ModelsCommand = effectCmd({
   command: "models [provider]",
@@ -20,13 +21,15 @@ export const ModelsCommand = effectCmd({
         type: "boolean",
       })
       .option("refresh", {
-        describe: "refresh the models cache from models.dev",
+        describe: "refresh the models cache from models.dev and the TokenGo relay",
         type: "boolean",
       }),
   handler: Effect.fn("Cli.models")(function* (args) {
     const { Provider } = yield* Effect.promise(() => import("@/provider/provider"))
     if (args.refresh) {
       yield* ModelsDev.Service.use((s) => s.refresh(true))
+      // Without a cache the provider state fetches the TokenGo list from the relay.
+      yield* Effect.promise(() => Tokengo.clearCache())
       UI.println(UI.Style.TEXT_SUCCESS_BOLD + "Models cache refreshed" + UI.Style.TEXT_NORMAL)
     }
 

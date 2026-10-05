@@ -11,7 +11,8 @@ import { TOKENGO_MODEL_PRIORITY, make, type Fetch, type Pricing } from "./client
 export const ID = "token-go"
 export const NAME = "TokenGo"
 
-const DEFAULT_TTL_MS = 60 * 60 * 1000
+// Same freshness window as upstream models.dev; the provider refresh loop renews it while running.
+const DEFAULT_TTL_MS = 5 * 60 * 1000
 const FETCH_TIMEOUT_MS = 8_000
 const ANTHROPIC_NPM = "@ai-sdk/anthropic"
 const OPENAI_NPM = "@ai-sdk/openai"
@@ -160,7 +161,7 @@ export async function clearCache() {
   await rm(cachePath(), { force: true })
 }
 
-export async function discover(input: {
+type DiscoverInput = {
   baseURL: string
   pat: string
   group: string
@@ -169,49 +170,57 @@ export async function discover(input: {
   fetch?: Fetch
   ttlMs?: number
   force?: boolean
-}): Promise<Record<string, Provider.Model>> {
+}
+
+// Startup path: any cached list for this account is served immediately, stale or not, so the
+// TUI opens without waiting on the relay. `refresh` (run by the provider loop) renews it.
+export async function discover(input: DiscoverInput): Promise<Record<string, Provider.Model>> {
+  const usable = await readUsable(input)
+  if (usable && !input.force) return usable.models
+  return fetchAndCache(input).catch(() => usable?.models ?? {})
+}
+
+// Returns the freshly fetched models, or undefined when the cache is still within the TTL.
+// Fetch failures reject so the caller keeps its current list.
+export async function refresh(input: DiscoverInput): Promise<Record<string, Provider.Model> | undefined> {
+  const usable = await readUsable(input)
+  if (!input.force && usable && Date.now() - usable.fetchedAt < (input.ttlMs ?? DEFAULT_TTL_MS)) return
+  return fetchAndCache(input)
+}
+
+async function readUsable(input: DiscoverInput) {
   const cached = await readCache()
-  const usable =
-    cached &&
+  return cached &&
     cached.baseURL === input.baseURL &&
     cached.group === input.group &&
     (cached.userId ?? "") === (input.userId ?? "")
-      ? cached
-      : undefined
-  const fresh = usable && Date.now() - usable.fetchedAt < (input.ttlMs ?? DEFAULT_TTL_MS)
-  if (usable && fresh && !input.force) return usable.models
+    ? cached
+    : undefined
+}
 
-  const refresh = async () => {
-    const client = make({ baseURL: input.baseURL, pat: input.pat, fetch: input.fetch, timeoutMs: FETCH_TIMEOUT_MS })
-    const [names, pricing] = await Promise.allSettled([client.userModels(input.group), client.pricingEnvelope()])
-    if (names.status === "rejected") throw names.reason
-    // Pricing is optional: some deployments hide it (403 / disabled nav module).
-    const envelope = pricing.status === "fulfilled" ? pricing.value : { data: [], group_ratio: {} }
-    const models = build({
-      names: names.value,
-      pricing: envelope.data,
-      catalog: input.catalog,
-      baseURL: input.baseURL,
-      groupRatio: envelope.group_ratio[input.group] ?? 1,
-    })
-    // A read-only or full cache dir must not hide freshly discovered models; there is no
-    // logger outside Effect fibers here, so the failure is dropped and the next start refetches.
-    await writeCache({
-      fetchedAt: Date.now(),
-      baseURL: input.baseURL,
-      group: input.group,
-      userId: input.userId,
-      models,
-    }).catch(() => undefined)
-    return models
-  }
-
-  // Stale cache: answer immediately, refresh in the background.
-  if (usable && !input.force) {
-    void refresh().catch(() => undefined)
-    return usable.models
-  }
-  return refresh().catch(() => usable?.models ?? {})
+async function fetchAndCache(input: DiscoverInput) {
+  const client = make({ baseURL: input.baseURL, pat: input.pat, fetch: input.fetch, timeoutMs: FETCH_TIMEOUT_MS })
+  const [names, pricing] = await Promise.allSettled([client.userModels(input.group), client.pricingEnvelope()])
+  if (names.status === "rejected") throw names.reason
+  // Pricing is optional: some deployments hide it (403 / disabled nav module).
+  const envelope = pricing.status === "fulfilled" ? pricing.value : { data: [], group_ratio: {} }
+  const models = build({
+    names: names.value,
+    pricing: envelope.data,
+    catalog: input.catalog,
+    baseURL: input.baseURL,
+    groupRatio: envelope.group_ratio[input.group] ?? 1,
+  })
+  // A read-only or full cache dir must not hide freshly discovered models; there is no
+  // logger outside Effect fibers here, so the failure is dropped and the next refresh refetches.
+  await writeCache({
+    fetchedAt: Date.now(),
+    baseURL: input.baseURL,
+    group: input.group,
+    userId: input.userId,
+    models,
+  }).catch(() => undefined)
+  return models
 }
 
 export function defaultModelID(models: Record<string, Provider.Model>): string | undefined {

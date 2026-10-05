@@ -14,6 +14,7 @@ import {
   discover,
   info,
   readCache,
+  refresh,
   variantsFor,
   writeCache,
 } from "@/provider/tokengo/models"
@@ -294,14 +295,6 @@ describe("tokengo discover cache", () => {
   }) as unknown as Fetch
   const model = build({ names: ["cached"], pricing: [row({ model_name: "cached" })], catalog: {}, baseURL })
   const args = { baseURL, pat: "pat", group: "tokengo", catalog: {} }
-  const until = async (check: () => Promise<boolean>, ms = 3000) => {
-    const end = Date.now() + ms
-    while (Date.now() < end) {
-      if (await check()) return
-      await Bun.sleep(10)
-    }
-    throw new Error(`condition not met within ${ms}ms`)
-  }
 
   let backup: Awaited<ReturnType<typeof readCache>>
   beforeEach(async () => {
@@ -371,11 +364,26 @@ describe("tokengo discover cache", () => {
     expect(await discover({ ...args, fetch: failing })).toEqual({})
   })
 
-  test("stale cache is served immediately and refreshed in the background", async () => {
+  // Startup must not wait on the relay: a stale list is shown and the provider loop renews it.
+  test("stale cache is served immediately without fetching", async () => {
     await writeCache({ fetchedAt: 0, baseURL, group: "tokengo", models: model })
-    expect(Object.keys(await discover({ ...args, fetch: okFetch }))).toEqual(["cached"])
-    await until(async () => Object.keys((await readCache())?.models ?? {}).includes("fresh"))
+    expect(Object.keys(await discover({ ...args, fetch: failing }))).toEqual(["cached"])
+  })
+
+  // Like upstream models.dev: within 5 minutes the cache is current; after that refresh fetches.
+  test("refresh skips a cache younger than 5 minutes and fetches an older one", async () => {
+    await writeCache({ fetchedAt: Date.now() - 4 * 60_000, baseURL, group: "tokengo", models: model })
+    expect(await refresh({ ...args, fetch: failing })).toBeUndefined()
+    await writeCache({ fetchedAt: Date.now() - 6 * 60_000, baseURL, group: "tokengo", models: model })
+    expect(Object.keys((await refresh({ ...args, fetch: okFetch }))!)).toEqual(["fresh"])
     expect(Object.keys((await readCache())!.models)).toEqual(["fresh"])
+  })
+
+  // `tokengo models --refresh` and callers that need the relay's current list.
+  test("forced refresh fetches even a fresh cache; a failure rejects", async () => {
+    await writeCache({ fetchedAt: Date.now(), baseURL, group: "tokengo", models: model })
+    expect(Object.keys((await refresh({ ...args, fetch: okFetch, force: true }))!)).toEqual(["fresh"])
+    await expect(refresh({ ...args, fetch: failing, force: true })).rejects.toThrow()
   })
 
   test("stale cache survives a failing refresh; force falls back to it", async () => {

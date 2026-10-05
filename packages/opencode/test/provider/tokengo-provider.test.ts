@@ -10,6 +10,7 @@ import { FAKE_TOKENGO_MODELS, FAKE_TOKENGO_PRICING, fakeTokengo } from "../lib/t
 import { Env } from "../../src/env"
 import { Plugin } from "../../src/plugin/index"
 import { Provider } from "@/provider/provider"
+import { GlobalBus } from "@/bus/global"
 import type { Pricing } from "@/provider/tokengo/client"
 import { ID, build, clearCache, readCache, writeCache } from "@/provider/tokengo/models"
 import fixture from "./../tool/fixtures/models-api.json"
@@ -243,3 +244,52 @@ it.instance(
     }),
   { config: { model: "token-go/deepseek-chat" } },
 )
+
+// Relay model changes must reach a running TUI without a restart, like upstream models.dev refreshes.
+it.instance("token-go: a stale list is shown at once, then replaced by the relay list with catalog.updated", () => {
+  const server = fakeTokengo()
+  const events: string[] = []
+  const listener = (event: { payload: { type: string } }) => events.push(event.payload.type)
+  return Effect.gen(function* () {
+    GlobalBus.on("event", listener)
+    yield* login(server.url, server.pat)
+    yield* Effect.promise(() =>
+      writeCache({
+        fetchedAt: 0,
+        baseURL: server.url,
+        group: "tokengo",
+        userId: "7",
+        models: build({ names: [FAKE_TOKENGO_MODELS[0]], pricing: [], catalog, baseURL: server.url }),
+      }),
+    )
+    const before = yield* Provider.use.list()
+    expect(Object.keys(before[tokengo].models)).toEqual([FAKE_TOKENGO_MODELS[0]])
+
+    yield* Effect.promise(async () => {
+      const end = Date.now() + 5000
+      while (!events.includes("catalog.updated") && Date.now() < end) await Bun.sleep(20)
+    })
+    expect(events).toContain("catalog.updated")
+    const after = yield* Provider.use.list()
+    expect(Object.keys(after[tokengo].models).sort()).toEqual([...FAKE_TOKENGO_MODELS].sort())
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        GlobalBus.off("event", listener)
+        server.stop()
+      }),
+    ),
+  )
+})
+
+// Within the 5-minute window the relay is not asked again.
+it.instance("token-go: a fresh cache is not refetched", () => {
+  const server = fakeTokengo()
+  return Effect.gen(function* () {
+    yield* login(server.url, server.pat)
+    yield* seedCache(server.url)
+    yield* Provider.use.list()
+    yield* Effect.promise(() => Bun.sleep(200))
+    expect(server.calls).not.toContain("GET /api/user/models?group=tokengo")
+  }).pipe(Effect.ensuring(Effect.sync(() => server.stop())))
+})
