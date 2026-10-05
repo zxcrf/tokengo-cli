@@ -243,6 +243,10 @@ function selectNpm(name: string, types: readonly string[]): string | undefined {
 function cost(row: Pricing | undefined, groupRatio: number): Provider.Model["cost"] {
   // quota_type 1 is per-request pricing, which has no per-token equivalent.
   if (!row || row.quota_type !== 0) return { input: 0, output: 0, cache: { read: 0, write: 0 } }
+  if (row.billing_mode === "tiered_expr" && row.billing_expr) {
+    const tiered = exprCost(row.billing_expr, groupRatio)
+    if (tiered) return tiered
+  }
   const input = (row.model_ratio ?? 0) * 2 * groupRatio
   return {
     input,
@@ -252,6 +256,25 @@ function cost(row: Pricing | undefined, groupRatio: number): Provider.Model["cos
       write: input * (row.create_cache_ratio ?? 1.25),
     },
   }
+}
+
+// Reads NewAPI billing expressions such as
+//   len <= 272000 ? tier("standard", p * 10 + c * 50 + cr * 1 + cc * 12.5) : tier("long_context", p * 20 + ...)
+// Coefficients are USD per 1M tokens: p input, c output, cr cache read, cc cache write (5m).
+// Time-of-day multipliers (peak-hour surcharges) have no equivalent in the cost model and are ignored.
+function exprCost(expr: string, groupRatio: number): Provider.Model["cost"] | undefined {
+  const tiers = [...expr.matchAll(/tier\(\s*"[^"]*"\s*,([^)]*)\)/g)].map((match) => {
+    const coef = Object.fromEntries(
+      [...match[1].matchAll(/\b(p|c|cr|cc)\s*\*\s*([\d.]+)/g)].map((term) => [term[1], Number(term[2]) * groupRatio]),
+    )
+    return { input: coef.p ?? 0, output: coef.c ?? 0, cache: { read: coef.cr ?? 0, write: coef.cc ?? 0 } }
+  })
+  if (!tiers[0]) return
+  // `len < N ? base : long` switches once the prompt exceeds N - 1 tokens, `len <= N` once it exceeds N.
+  const threshold = expr.match(/\blen\s*(<=|<)\s*(\d+)/)
+  if (!threshold || !tiers[1]) return tiers[0]
+  const size = Number(threshold[2]) - (threshold[1] === "<" ? 1 : 0)
+  return { ...tiers[0], tiers: [{ ...tiers[1], tier: { type: "context" as const, size } }] }
 }
 
 function fallback(name: string): Meta {

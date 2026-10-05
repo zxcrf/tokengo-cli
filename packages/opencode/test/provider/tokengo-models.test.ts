@@ -19,6 +19,8 @@ import {
   writeCache,
 } from "@/provider/tokengo/models"
 import { ProviderTransform } from "@/provider/transform"
+import { Session } from "@/session/session"
+import { Usage } from "@opencode-ai/llm"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import fixture from "./../tool/fixtures/models-api.json"
@@ -218,6 +220,82 @@ describe("tokengo models build", () => {
     expect(models.m.cost.output).toBeCloseTo(7.5)
     expect(models.m.cost.cache.read).toBeCloseTo(1.5)
     expect(models.m.cost.cache.write).toBeCloseTo(1.875)
+  })
+
+  test("tiered_expr rows are priced from billing_expr, not the stale ratio fields", () => {
+    const models = build({
+      names: ["opus", "astra", "flash", "grok", "garbled"],
+      pricing: [
+        row({
+          model_name: "opus",
+          model_ratio: 37.5,
+          completion_ratio: 1,
+          billing_mode: "tiered_expr",
+          billing_expr: 'tier("base", p * 4 + c * 20 + cr * 0.2 + cc * 5 + cc1h * 8)',
+        }),
+        row({
+          model_name: "astra",
+          billing_mode: "tiered_expr",
+          billing_expr:
+            'len <= 272000 ? tier("standard", p * 10 + c * 50 + cr * 1 + cc * 12.5) : tier("long_context", p * 20 + c * 75 + cr * 2 + cc * 25)',
+        }),
+        row({
+          model_name: "flash",
+          billing_mode: "tiered_expr",
+          billing_expr:
+            '(tier("base", p * 1 + c * 4 + cr * 0.04)) * (weekday("Asia/Shanghai") >= 1 && hour("Asia/Shanghai") < 12 ? 2 : 1)',
+        }),
+        row({
+          model_name: "grok",
+          billing_mode: "tiered_expr",
+          billing_expr: 'len < 200000 ? tier("base", p * 2 + c * 6 + cr * 0.5) : tier("long_context", p * 4 + c * 12 + cr * 1)',
+        }),
+        row({ model_name: "garbled", model_ratio: 1.5, billing_mode: "tiered_expr", billing_expr: "p * 3" }),
+      ],
+      catalog: {},
+      baseURL,
+      groupRatio: 0.5,
+    })
+    expect(models.opus.cost).toEqual({ input: 2, output: 10, cache: { read: 0.1, write: 2.5 } })
+    expect(models.astra.cost).toEqual({
+      input: 5,
+      output: 25,
+      cache: { read: 0.5, write: 6.25 },
+      tiers: [{ input: 10, output: 37.5, cache: { read: 1, write: 12.5 }, tier: { type: "context", size: 272000 } }],
+    })
+    // Peak-hour multipliers are not representable; the base tier is used.
+    expect(models.flash.cost).toEqual({ input: 0.5, output: 2, cache: { read: 0.02, write: 0 } })
+    expect(models.grok.cost.tiers?.[0].tier.size).toBe(199999)
+    // Unparseable expressions fall back to ratio pricing instead of showing zero.
+    expect(models.garbled.cost.input).toBeCloseTo(1.5)
+  })
+
+  test("session cost for a tiered_expr model matches the relay bill", () => {
+    const model = build({
+      names: ["claude-opus-5-5"],
+      pricing: [
+        row({
+          model_name: "claude-opus-5-5",
+          model_ratio: 37.5,
+          billing_mode: "tiered_expr",
+          billing_expr: 'tier("base", p * 4 + c * 20 + cr * 0.2 + cc * 5 + cc1h * 8)',
+        }),
+      ],
+      catalog: {},
+      baseURL,
+    })["claude-opus-5-5"]
+    // A real relay log: 2 input, 271 output, 82920 cache read, 1175 cache write billed 13944 quota ($0.027888).
+    const usage = Session.getUsage({
+      model,
+      usage: new Usage({
+        inputTokens: 2 + 82920 + 1175,
+        outputTokens: 271,
+        totalTokens: 2 + 82920 + 1175 + 271,
+        cacheReadInputTokens: 82920,
+        cacheWriteInputTokens: 1175,
+      }),
+    })
+    expect(usage.cost).toBeCloseTo(13944 / 500000, 5)
   })
 
   test("canonical vendor wins, deprecated/alpha entries are skipped, catalog options/headers are not copied", () => {

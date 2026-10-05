@@ -52,6 +52,9 @@ const Pricing = Schema.Struct({
   completion_ratio: Schema.optional(Schema.Number),
   cache_ratio: Schema.optional(Schema.Number),
   create_cache_ratio: Schema.optional(Schema.Number),
+  // "tiered_expr" rows are billed by `billing_expr`; their ratio fields are stale leftovers.
+  billing_mode: Schema.optional(Schema.String),
+  billing_expr: Schema.optional(Schema.String),
   enable_groups: Schema.optional(Schema.Array(Schema.String)),
   supported_endpoint_types: Schema.optional(Schema.Array(Schema.String)),
   owner_by: Schema.optional(Schema.String),
