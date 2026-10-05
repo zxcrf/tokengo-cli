@@ -4,8 +4,9 @@ export const Brand = {
   envPrefix: "TOKENGO_",
   configFile: "tokengo", // tokengo.json / tokengo.jsonc
   projectDir: ".tokengo", // project-level config dir
-  repo: "zxcrf/opencode",
-  releaseApi: "https://api.github.com/repos/zxcrf/opencode/releases/latest",
-  installScript: "https://raw.githubusercontent.com/zxcrf/opencode/dev/install",
-  schemaURL: "https://raw.githubusercontent.com/zxcrf/opencode/dev/packages/opencode/config.schema.json",
+  repo: "zxcrf/tokengo-cli",
+  releaseApi: "https://api.github.com/repos/zxcrf/tokengo-cli/releases/latest",
+  installScript: "https://raw.githubusercontent.com/zxcrf/tokengo-cli/main/install",
+  installScriptWindows: "https://raw.githubusercontent.com/zxcrf/tokengo-cli/main/install.ps1",
+  schemaURL: "https://raw.githubusercontent.com/zxcrf/tokengo-cli/main/packages/opencode/config.schema.json",
 } as const

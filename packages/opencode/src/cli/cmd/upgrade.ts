@@ -7,18 +7,19 @@ import { InstallationVersion } from "@opencode-ai/core/installation/version"
 
 export const UpgradeCommand = {
   command: "upgrade [target]",
-  describe: "upgrade opencode to the latest or a specific version",
+  describe: "upgrade tokengo to the latest or a specific version",
   builder: (yargs: Argv) => {
     return yargs
       .positional("target", {
-        describe: "version to upgrade to, for ex '0.1.48' or 'v0.1.48'",
+        describe: "version to upgrade to, for ex '1.18.33-tokengo.2' or 'v1.18.33-tokengo.2'",
         type: "string",
       })
       .option("method", {
         alias: "m",
         describe: "installation method to use",
         type: "string",
-        choices: ["curl", "npm", "pnpm", "bun", "brew", "choco", "scoop"],
+        // TokenGo ships only through its own install scripts; package managers carry upstream opencode.
+        choices: ["curl"],
       })
   },
   handler: async (args: { target?: string; method?: string }) => {

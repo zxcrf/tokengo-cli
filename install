@@ -15,13 +15,13 @@ Usage: install.sh [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 1.0.180)
+    -v, --version <version> Install a specific version (e.g., 1.18.33-tokengo.1)
     -b, --binary <path>     Install from a local binary instead of downloading
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
-    curl -fsSL https://raw.githubusercontent.com/zxcrf/opencode/dev/install | bash
-    curl -fsSL https://raw.githubusercontent.com/zxcrf/opencode/dev/install | bash -s -- --version 1.0.180
+    curl -fsSL https://raw.githubusercontent.com/zxcrf/tokengo-cli/main/install | bash
+    curl -fsSL https://raw.githubusercontent.com/zxcrf/tokengo-cli/main/install | bash -s -- --version 1.18.33-tokengo.1
     ./install --binary /path/to/tokengo
 EOF
 }
@@ -181,8 +181,8 @@ else
     fi
 
     if [ -z "$requested_version" ]; then
-        url="https://github.com/zxcrf/opencode/releases/latest/download/$filename"
-        specific_version=$(curl -s https://api.github.com/repos/zxcrf/opencode/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+        url="https://github.com/zxcrf/tokengo-cli/releases/latest/download/$filename"
+        specific_version=$(curl -s https://api.github.com/repos/zxcrf/tokengo-cli/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 
         if [[ $? -ne 0 || -z "$specific_version" ]]; then
             echo -e "${RED}Failed to fetch version information${NC}"
@@ -191,14 +191,14 @@ else
     else
         # Strip leading 'v' if present
         requested_version="${requested_version#v}"
-        url="https://github.com/zxcrf/opencode/releases/download/v${requested_version}/$filename"
+        url="https://github.com/zxcrf/tokengo-cli/releases/download/v${requested_version}/$filename"
         specific_version=$requested_version
 
         # Verify the release exists before downloading
-        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/zxcrf/opencode/releases/tag/v${requested_version}")
+        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/zxcrf/tokengo-cli/releases/tag/v${requested_version}")
         if [ "$http_status" = "404" ]; then
             echo -e "${RED}Error: Release v${requested_version} not found${NC}"
-            echo -e "${MUTED}Available releases: https://github.com/zxcrf/opencode/releases${NC}"
+            echo -e "${MUTED}Available releases: https://github.com/zxcrf/tokengo-cli/releases${NC}"
             exit 1
         fi
     fi
@@ -444,10 +444,6 @@ if [ -n "${GITHUB_ACTIONS-}" ] && [ "${GITHUB_ACTIONS}" == "true" ]; then
 fi
 
 echo -e ""
-echo -e "${MUTED}                    ${NC}             ▄     "
-echo -e "${MUTED}█▀▀█ █▀▀█ █▀▀█ █▀▀▄ ${NC}█▀▀▀ █▀▀█ █▀▀█ █▀▀█"
-echo -e "${MUTED}█░░█ █░░█ █▀▀▀ █░░█ ${NC}█░░░ █░░█ █░░█ █▀▀▀"
-echo -e "${MUTED}▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ${NC}▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"
 echo -e ""
 echo -e ""
 echo -e "${MUTED}TokenGo - to start:${NC}"
@@ -455,6 +451,6 @@ echo -e ""
 echo -e "cd <project>  ${MUTED}# Open directory${NC}"
 echo -e "tokengo       ${MUTED}# Run command${NC}"
 echo -e ""
-echo -e "${MUTED}For more information visit ${NC}https://github.com/zxcrf/opencode"
+echo -e "${MUTED}For more information visit ${NC}https://github.com/zxcrf/tokengo-cli"
 echo -e ""
 echo -e ""

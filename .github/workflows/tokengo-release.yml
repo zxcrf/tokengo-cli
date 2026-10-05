@@ -1,0 +1,96 @@
+name: tokengo-release
+
+# Push a tag v<upstream version>-tokengo.<N> (e.g. v1.18.33-tokengo.1) to build all
+# platform binaries and publish them as the latest GitHub release. The install scripts
+# and `tokengo upgrade` download assets named tokengo-<os>-<arch>[-baseline][-musl].{zip,tar.gz}.
+on:
+  push:
+    tags:
+      - "v*-tokengo.*"
+
+permissions:
+  contents: write
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  release:
+    # macOS runner so the darwin binaries can be ad-hoc signed; Bun cross-compiles the rest.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Resolve version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          upstream=$(node -p "require('./packages/opencode/package.json').version")
+          case "$version" in
+            "$upstream"-tokengo.*) ;;
+            *) echo "Tag $GITHUB_REF_NAME must be v$upstream-tokengo.<N>"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: ./packages/opencode/script/build.ts
+        env:
+          OPENCODE_VERSION: ${{ steps.version.outputs.version }}
+          OPENCODE_CHANNEL: latest
+
+      - name: Sign macOS binaries (ad-hoc)
+        working-directory: packages/opencode/dist
+        run: |
+          for dir in tokengo-darwin-*/; do
+            codesign --force --sign - "${dir}bin/tokengo"
+            codesign --verify --strict "${dir}bin/tokengo"
+          done
+
+      - name: Package
+        working-directory: packages/opencode/dist
+        run: |
+          for dir in tokengo-*/; do
+            name="${dir%/}"
+            case "$name" in
+              *linux*) (cd "$name/bin" && tar -czf "../../$name.tar.gz" *) ;;
+              *) (cd "$name/bin" && zip -qr "../../$name.zip" *) ;;
+            esac
+          done
+          ls -la *.zip *.tar.gz
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "TokenGo $GITHUB_REF_NAME" \
+            --generate-notes \
+            --latest \
+            packages/opencode/dist/*.zip packages/opencode/dist/*.tar.gz
+
+  # Install the just-published release through the public install scripts on each OS.
+  verify-install:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install (bash)
+        if: runner.os != 'Windows'
+        run: curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/install" | bash -s -- --version "$GITHUB_REF_NAME"
+      - name: Install (PowerShell)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:VERSION = $env:GITHUB_REF_NAME
+          irm "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/install.ps1" | iex
+      - name: Check version
+        shell: bash
+        run: |
+          installed=$(tokengo --version)
+          echo "installed: $installed"
+          test "$installed" = "${GITHUB_REF_NAME#v}"

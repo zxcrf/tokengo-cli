@@ -145,12 +145,17 @@ const layer: Layer.Layer<Service, never, HttpClient.HttpClient | AppProcess.Serv
 
     const upgradeCurl = Effect.fnUntraced(
       function* (target: string) {
-        const response = yield* httpOk.execute(HttpClientRequest.get(Brand.installScript))
+        // TokenGo: Windows installs come from install.ps1, so upgrades re-run it through PowerShell.
+        const windows = process.platform === "win32"
+        const response = yield* httpOk.execute(
+          HttpClientRequest.get(windows ? Brand.installScriptWindows : Brand.installScript),
+        )
         const body = yield* response.text
         const bodyBytes = new TextEncoder().encode(body)
-        const shell = yield* upgradeScriptShell()
+        const shell = windows ? "powershell" : yield* upgradeScriptShell()
+        const args = windows ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "-"] : []
         const result = yield* appProcess.run(
-          ChildProcess.make(shell, [], {
+          ChildProcess.make(shell, args, {
             stdin: Stream.make(bodyBytes),
             env: { VERSION: target },
             extendEnv: true,
